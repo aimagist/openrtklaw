@@ -225,6 +225,31 @@ rtk gain --history | grep proxy
 | utils.rs | Shared utilities | Package manager detection, common formatting |
 | discover/ | Claude Code history analysis | Scan JSONL sessions, classify commands, report missed savings |
 
+## OpenClaw Integration
+
+RTK supports OpenClaw as an alternative to Claude Code. The integration consists of:
+
+**1. Plugin (`openclaw/rtk-rewrite/`)**
+- TypeScript OpenClaw plugin using `before_tool_call` hook
+- Intercepts `exec` tool calls and rewrites command strings to RTK equivalents
+- Same rewrite rules as `hooks/rtk-rewrite.sh` but cross-platform
+- Files: `openclaw.plugin.json` (manifest) + `index.ts` (handler)
+
+**2. Gateway Hook (`openclaw/hooks/rtk-bootstrap/`)**
+- Injects RTK awareness into agent bootstrap context via `agent:bootstrap` event
+- Teaches the agent about meta commands (gain, discover, proxy)
+- Files: `HOOK.md` (metadata) + `handler.ts` (handler)
+
+**3. Workspace Files (`openclaw/`)**
+- `rtk-tools.md`: Slim agent instructions (~30 lines, for TOOLS.md)
+- `rtk-agents.md`: Full command reference (for AGENTS.md, legacy mode)
+
+**4. Init System (`src/init.rs`)**
+- `rtk init --openclaw`: Installs plugin + hook to `~/.openclaw/`
+- `rtk init --openclaw --uninstall`: Removes all OpenClaw artifacts
+- `rtk init --show`: Displays both Claude Code and OpenClaw status
+- All OpenClaw files are embedded via `include_str!` in the binary
+
 ## Fork-Specific Features
 
 ### PR #5: Git Argument Parsing Fix (CRITICAL)

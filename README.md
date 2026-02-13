@@ -564,9 +564,44 @@ chmod +x ~/.claude/hooks/rtk-suggest.sh
 
 The suggest hook detects the same commands as the rewrite hook but outputs a `systemMessage` instead of `updatedInput`, informing Claude Code that an rtk alternative exists.
 
+## OpenClaw Integration
+
+RTK also works with [OpenClaw](https://docs.openclaw.ai/) as an alternative to Claude Code. The integration uses OpenClaw's plugin and hook systems for transparent command rewriting.
+
+### Quick Install (OpenClaw)
+
+```bash
+# 1. Install RTK plugin + hook
+rtk init --openclaw
+
+# 2. Enable in OpenClaw
+openclaw plugins enable rtk-rewrite
+openclaw hooks enable rtk-bootstrap
+
+# 3. Restart the Gateway, then test via chat
+```
+
+### How It Works
+
+- **Plugin (`rtk-rewrite`)**: Intercepts `exec` tool calls via `before_tool_call` and rewrites commands (e.g., `git status` → `rtk git status`)
+- **Hook (`rtk-bootstrap`)**: Injects RTK awareness into the agent's bootstrap context so it knows about meta commands (`rtk gain`, `rtk discover`)
+- **Workspace (`TOOLS.md`)**: Optional agent instructions for non-plugin users
+
+### Uninstall (OpenClaw)
+
+```bash
+rtk init --openclaw --uninstall
+
+# Removes:
+#   - ~/.openclaw/extensions/rtk-rewrite/
+#   - ~/.openclaw/hooks/rtk-bootstrap/
+
+# Restart the Gateway after uninstall
+```
+
 ## Uninstalling RTK
 
-**Complete Removal (Global Only)**:
+**Complete Removal — Claude Code (Global Only)**:
 ```bash
 rtk init -g --uninstall
 
@@ -577,6 +612,12 @@ rtk init -g --uninstall
 #   - RTK hook entry from ~/.claude/settings.json
 
 # Restart Claude Code after uninstall
+```
+
+**Complete Removal — OpenClaw**:
+```bash
+rtk init --openclaw --uninstall
+# Restart the Gateway after uninstall
 ```
 
 **Restore from Backup** (if needed):

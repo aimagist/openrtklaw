@@ -249,7 +249,7 @@ enum Commands {
         extra_args: Vec<String>,
     },
 
-    /// Initialize rtk instructions in CLAUDE.md
+    /// Initialize rtk instructions in CLAUDE.md or OpenClaw
     Init {
         /// Add to global ~/.claude/CLAUDE.md instead of local
         #[arg(short, long)]
@@ -266,6 +266,10 @@ enum Commands {
         /// Hook only, no RTK.md
         #[arg(long = "hook-only", group = "mode")]
         hook_only: bool,
+
+        /// Install RTK plugin + hook for OpenClaw
+        #[arg(long, group = "mode")]
+        openclaw: bool,
 
         /// Auto-patch settings.json without prompting
         #[arg(long = "auto-patch", group = "patch")]
@@ -1033,6 +1037,7 @@ fn main() -> Result<()> {
             show,
             claude_md,
             hook_only,
+            openclaw,
             auto_patch,
             no_patch,
             uninstall,
@@ -1040,7 +1045,13 @@ fn main() -> Result<()> {
             if show {
                 init::show_config()?;
             } else if uninstall {
-                init::uninstall(global, cli.verbose)?;
+                if openclaw {
+                    init::uninstall_openclaw(cli.verbose)?;
+                } else {
+                    init::uninstall(global, cli.verbose)?;
+                }
+            } else if openclaw {
+                init::run_openclaw_mode(cli.verbose)?;
             } else {
                 let patch_mode = if auto_patch {
                     init::PatchMode::Auto

@@ -10,6 +10,13 @@ const REWRITE_HOOK: &str = include_str!("../hooks/rtk-rewrite.sh");
 // Embedded slim RTK awareness instructions
 const RTK_SLIM: &str = include_str!("../hooks/rtk-awareness.md");
 
+// Embedded OpenClaw plugin files
+const OPENCLAW_PLUGIN_JSON: &str = include_str!("../openclaw/rtk-rewrite/openclaw.plugin.json");
+const OPENCLAW_PLUGIN_INDEX: &str = include_str!("../openclaw/rtk-rewrite/index.ts");
+const OPENCLAW_HOOK_MD: &str = include_str!("../openclaw/hooks/rtk-bootstrap/HOOK.md");
+const OPENCLAW_HOOK_HANDLER: &str = include_str!("../openclaw/hooks/rtk-bootstrap/handler.ts");
+const OPENCLAW_TOOLS_MD: &str = include_str!("../openclaw/rtk-tools.md");
+
 /// Control flow for settings.json patching
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PatchMode {
@@ -985,6 +992,9 @@ pub fn show_config() -> Result<()> {
         println!("⚪ settings.json: not found");
     }
 
+    // Show OpenClaw status
+    show_openclaw_config();
+
     println!("\nUsage:");
     println!("  rtk init              # Full injection into local CLAUDE.md");
     println!("  rtk init -g           # Hook + RTK.md + @RTK.md + settings.json (recommended)");
@@ -993,8 +1003,183 @@ pub fn show_config() -> Result<()> {
     println!("  rtk init -g --uninstall     # Remove all RTK artifacts");
     println!("  rtk init -g --claude-md     # Legacy: full injection into ~/.claude/CLAUDE.md");
     println!("  rtk init -g --hook-only     # Hook only, no RTK.md");
+    println!("  rtk init --openclaw         # Install RTK plugin + hook for OpenClaw");
+    println!("  rtk init --openclaw --uninstall  # Remove RTK from OpenClaw");
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// OpenClaw integration
+// ---------------------------------------------------------------------------
+
+/// Resolve ~/.openclaw directory
+fn resolve_openclaw_dir() -> Result<PathBuf> {
+    dirs::home_dir()
+        .map(|h| h.join(".openclaw"))
+        .context("Cannot determine home directory. Is $HOME set?")
+}
+
+/// Install RTK plugin + hook for OpenClaw
+pub fn run_openclaw_mode(verbose: u8) -> Result<()> {
+    let openclaw_dir = resolve_openclaw_dir()?;
+    let mut installed = Vec::new();
+
+    // 1. Install plugin to ~/.openclaw/extensions/rtk-rewrite/
+    let plugin_dir = openclaw_dir.join("extensions").join("rtk-rewrite");
+    fs::create_dir_all(&plugin_dir)
+        .with_context(|| format!("Failed to create plugin directory: {}", plugin_dir.display()))?;
+
+    let plugin_json_path = plugin_dir.join("openclaw.plugin.json");
+    let plugin_index_path = plugin_dir.join("index.ts");
+
+    if write_if_changed(&plugin_json_path, OPENCLAW_PLUGIN_JSON, "openclaw.plugin.json", verbose)? {
+        installed.push(format!("Plugin manifest: {}", plugin_json_path.display()));
+    }
+    if write_if_changed(&plugin_index_path, OPENCLAW_PLUGIN_INDEX, "index.ts", verbose)? {
+        installed.push(format!("Plugin entry: {}", plugin_index_path.display()));
+    }
+
+    // 2. Install hook to ~/.openclaw/hooks/rtk-bootstrap/
+    let hook_dir = openclaw_dir.join("hooks").join("rtk-bootstrap");
+    fs::create_dir_all(&hook_dir)
+        .with_context(|| format!("Failed to create hook directory: {}", hook_dir.display()))?;
+
+    let hook_md_path = hook_dir.join("HOOK.md");
+    let hook_handler_path = hook_dir.join("handler.ts");
+
+    if write_if_changed(&hook_md_path, OPENCLAW_HOOK_MD, "HOOK.md", verbose)? {
+        installed.push(format!("Hook metadata: {}", hook_md_path.display()));
+    }
+    if write_if_changed(&hook_handler_path, OPENCLAW_HOOK_HANDLER, "handler.ts", verbose)? {
+        installed.push(format!("Hook handler: {}", hook_handler_path.display()));
+    }
+
+    // 3. Install TOOLS.md awareness file to workspace (optional, current dir)
+    let tools_md_path = PathBuf::from("TOOLS.md");
+    if !tools_md_path.exists() {
+        fs::write(&tools_md_path, OPENCLAW_TOOLS_MD)
+            .with_context(|| "Failed to write TOOLS.md")?;
+        installed.push(format!("Workspace: ./TOOLS.md"));
+    } else {
+        let existing = fs::read_to_string(&tools_md_path)?;
+        if !existing.contains("RTK") {
+            let new_content = format!("{}\n\n{}", existing.trim(), OPENCLAW_TOOLS_MD);
+            fs::write(&tools_md_path, new_content)?;
+            installed.push("Workspace: appended RTK section to ./TOOLS.md".to_string());
+        } else if verbose > 0 {
+            eprintln!("TOOLS.md already contains RTK instructions, skipping");
+        }
+    }
+
+    // 4. Print results
+    println!("\nRTK installed for OpenClaw.\n");
+
+    if installed.is_empty() {
+        println!("  All files already up to date.");
+    } else {
+        for item in &installed {
+            println!("  ✅ {}", item);
+        }
+    }
+
+    println!("\n  Plugin: {}", plugin_dir.display());
+    println!("  Hook:   {}", hook_dir.display());
+
+    println!("\n  Next steps:");
+    println!("    1. Enable the plugin:  openclaw plugins enable rtk-rewrite");
+    println!("    2. Enable the hook:    openclaw hooks enable rtk-bootstrap");
+    println!("    3. Restart the Gateway");
+    println!("    4. Test: send a message that triggers `git status`\n");
+
+    Ok(())
+}
+
+/// Uninstall RTK from OpenClaw
+pub fn uninstall_openclaw(_verbose: u8) -> Result<()> {
+    let openclaw_dir = resolve_openclaw_dir()?;
+    let mut removed = Vec::new();
+
+    // 1. Remove plugin
+    let plugin_dir = openclaw_dir.join("extensions").join("rtk-rewrite");
+    if plugin_dir.exists() {
+        fs::remove_dir_all(&plugin_dir)
+            .with_context(|| format!("Failed to remove plugin: {}", plugin_dir.display()))?;
+        removed.push(format!("Plugin: {}", plugin_dir.display()));
+    }
+
+    // 2. Remove hook
+    let hook_dir = openclaw_dir.join("hooks").join("rtk-bootstrap");
+    if hook_dir.exists() {
+        fs::remove_dir_all(&hook_dir)
+            .with_context(|| format!("Failed to remove hook: {}", hook_dir.display()))?;
+        removed.push(format!("Hook: {}", hook_dir.display()));
+    }
+
+    // Report results
+    if removed.is_empty() {
+        println!("RTK was not installed for OpenClaw (nothing to remove)");
+    } else {
+        println!("RTK uninstalled from OpenClaw:");
+        for item in removed {
+            println!("  - {}", item);
+        }
+        println!("\nRestart the Gateway to apply changes.");
+        println!("Note: ./TOOLS.md was not modified. Remove RTK section manually if needed.");
+    }
+
+    Ok(())
+}
+
+/// Show OpenClaw-specific configuration status
+fn show_openclaw_config() {
+    let openclaw_dir = match resolve_openclaw_dir() {
+        Ok(d) => d,
+        Err(_) => {
+            println!("\n⚪ OpenClaw: home directory not found");
+            return;
+        }
+    };
+
+    println!("\n── OpenClaw ──");
+
+    // Check plugin
+    let plugin_dir = openclaw_dir.join("extensions").join("rtk-rewrite");
+    let plugin_json = plugin_dir.join("openclaw.plugin.json");
+    let plugin_index = plugin_dir.join("index.ts");
+    if plugin_json.exists() && plugin_index.exists() {
+        println!("✅ Plugin: {} (installed)", plugin_dir.display());
+    } else if plugin_dir.exists() {
+        println!("⚠️  Plugin: {} (incomplete)", plugin_dir.display());
+    } else {
+        println!("⚪ Plugin: not installed");
+    }
+
+    // Check hook
+    let hook_dir = openclaw_dir.join("hooks").join("rtk-bootstrap");
+    let hook_md = hook_dir.join("HOOK.md");
+    let hook_handler = hook_dir.join("handler.ts");
+    if hook_md.exists() && hook_handler.exists() {
+        println!("✅ Hook: {} (installed)", hook_dir.display());
+    } else if hook_dir.exists() {
+        println!("⚠️  Hook: {} (incomplete)", hook_dir.display());
+    } else {
+        println!("⚪ Hook: not installed");
+    }
+
+    // Check TOOLS.md in current directory
+    let tools_md = PathBuf::from("TOOLS.md");
+    if tools_md.exists() {
+        if let Ok(content) = fs::read_to_string(&tools_md) {
+            if content.contains("RTK") {
+                println!("✅ Workspace (./TOOLS.md): RTK instructions present");
+            } else {
+                println!("⚪ Workspace (./TOOLS.md): exists but RTK not configured");
+            }
+        }
+    } else {
+        println!("⚪ Workspace (./TOOLS.md): not found");
+    }
 }
 
 #[cfg(test)]
@@ -1347,6 +1532,71 @@ More content"#;
         // Check it's the other hook
         let command = pre_tool_use[0]["hooks"][0]["command"].as_str().unwrap();
         assert_eq!(command, "/some/other/hook.sh");
+    }
+
+    // Tests for OpenClaw integration
+    #[test]
+    fn test_openclaw_plugin_json_is_valid() {
+        let parsed: serde_json::Value = serde_json::from_str(OPENCLAW_PLUGIN_JSON)
+            .expect("openclaw.plugin.json must be valid JSON");
+        assert_eq!(parsed["id"], "rtk-rewrite");
+        assert!(parsed["configSchema"].is_object());
+    }
+
+    #[test]
+    fn test_openclaw_plugin_index_has_rewrite_rules() {
+        assert!(OPENCLAW_PLUGIN_INDEX.contains("REWRITE_RULES"));
+        assert!(OPENCLAW_PLUGIN_INDEX.contains("before_tool_call"));
+        assert!(OPENCLAW_PLUGIN_INDEX.contains("tryRewrite"));
+        assert!(OPENCLAW_PLUGIN_INDEX.contains("shouldSkip"));
+    }
+
+    #[test]
+    fn test_openclaw_hook_md_has_metadata() {
+        assert!(OPENCLAW_HOOK_MD.contains("name: rtk-bootstrap"));
+        assert!(OPENCLAW_HOOK_MD.contains("agent:bootstrap"));
+        assert!(OPENCLAW_HOOK_MD.contains("rtk"));
+    }
+
+    #[test]
+    fn test_openclaw_hook_handler_has_bootstrap() {
+        assert!(OPENCLAW_HOOK_HANDLER.contains("agent"));
+        assert!(OPENCLAW_HOOK_HANDLER.contains("bootstrap"));
+        assert!(OPENCLAW_HOOK_HANDLER.contains("bootstrapFiles"));
+    }
+
+    #[test]
+    fn test_openclaw_tools_md_has_instructions() {
+        assert!(OPENCLAW_TOOLS_MD.contains("RTK"));
+        assert!(OPENCLAW_TOOLS_MD.contains("rtk gain"));
+        assert!(OPENCLAW_TOOLS_MD.contains("rtk discover"));
+    }
+
+    #[test]
+    fn test_openclaw_install_creates_files() {
+        let temp = TempDir::new().unwrap();
+        let ext_dir = temp.path().join("extensions").join("rtk-rewrite");
+        let hook_dir = temp.path().join("hooks").join("rtk-bootstrap");
+
+        // Simulate what run_openclaw_mode does (without the real home dir)
+        fs::create_dir_all(&ext_dir).unwrap();
+        fs::write(ext_dir.join("openclaw.plugin.json"), OPENCLAW_PLUGIN_JSON).unwrap();
+        fs::write(ext_dir.join("index.ts"), OPENCLAW_PLUGIN_INDEX).unwrap();
+
+        fs::create_dir_all(&hook_dir).unwrap();
+        fs::write(hook_dir.join("HOOK.md"), OPENCLAW_HOOK_MD).unwrap();
+        fs::write(hook_dir.join("handler.ts"), OPENCLAW_HOOK_HANDLER).unwrap();
+
+        // Verify all files exist
+        assert!(ext_dir.join("openclaw.plugin.json").exists());
+        assert!(ext_dir.join("index.ts").exists());
+        assert!(hook_dir.join("HOOK.md").exists());
+        assert!(hook_dir.join("handler.ts").exists());
+
+        // Verify content
+        let plugin_json = fs::read_to_string(ext_dir.join("openclaw.plugin.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&plugin_json).unwrap();
+        assert_eq!(parsed["id"], "rtk-rewrite");
     }
 
     #[test]
